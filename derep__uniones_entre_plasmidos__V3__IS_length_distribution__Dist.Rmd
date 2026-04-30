@@ -1,0 +1,33 @@
+```{r}
+library(ggplot2)
+library(ggplot2)
+library(scales)
+
+
+
+df <- read.csv(
+  "/home/nacho/HDD16/Nacho/RepliCOOC/derep/uniones_entre_plasmidos/V3/IS_length_distribution/IS_lengths.csv"
+)
+
+ggplot(df, aes(x = length)) +
+  geom_histogram(
+    binwidth = 100,
+    color = "black",
+    fill = "steelblue",
+    linewidth = 0.2
+  ) +
+  scale_x_continuous(
+    limits = c(0, 5000),
+    breaks = seq(0, 5000, by = 1000),
+    labels = label_comma()
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    x = "IS length (bp)",
+    y = "Count"
+  )
+```
+
