@@ -112,7 +112,14 @@ process_pair <- function(pair_dir, cfg) {
     stop("fewer_than_two_aligned_fastas")
   }
 
-  aligned <- sort(aligned)[1:2]
+  preferred <- aligned[grepl("_all_aligned\\.f(ast)?a$", aligned)]
+  if (length(preferred) == 2) {
+    aligned <- sort(preferred)
+  } else if (length(aligned) == 2) {
+    aligned <- sort(aligned)
+  } else {
+    stop("ambiguous_number_of_aligned_fastas")
+  }
   aln_a_path <- aligned[[1]]
   aln_b_path <- aligned[[2]]
 
