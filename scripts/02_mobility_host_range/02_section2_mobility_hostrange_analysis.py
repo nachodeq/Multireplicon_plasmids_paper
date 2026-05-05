@@ -17,15 +17,10 @@ Figure 2b:
 - Predicted host-range distribution by replicon status.
 - Category-specific Fisher exact tests with FDR correction.
 
-Figure 2c:
-- Observed host-range expansion events.
-- Each event is one replicon + newly observed genus in multi-replicon context.
-- Taxonomic jump is assigned as the minimum taxonomic level separating the new genus
-  from any baseline single-replicon genus.
-
-Figure 2d:
-- Transition table connecting baseline genera to newly acquired genera.
-- Edge weight is the number of distinct replicons supporting each transition.
+Figure 2c/d:
+- Moved to the dedicated R workflow:
+  scripts/02_mobility_host_range/02_section2_hostrange_jumps_minimum_event.R
+- This Python script now focuses on Figure 2a/2b and related summary tables.
 
 Inputs:
 - Supplementary_Dataset_1.xlsx with plasmid_id and n_replicons.
@@ -663,29 +658,11 @@ def main() -> None:
     )
     write_table(suppfig4_replicon_predicted_host_range(df), outdir / "suppfig4_replicon_predicted_host_range.tsv")
 
-    # Figure 2c/d
-    genera = sorted(df["host_genus"].dropna().unique())
-
-    if args.taxonomy:
-        taxonomy_df = load_taxonomy_table(args.taxonomy)
-    else:
-        print("[info] No taxonomy table provided; trying ete3.NCBITaxa.")
-        taxonomy_df = build_taxonomy_with_ete3(genera)
-
-    write_table(taxonomy_df, outdir / "section2_genus_taxonomy.tsv")
-
-    raw_events, unique_events, jump_counts, transition_edges = observed_expansion_events(df, taxonomy_df)
-
+    # Figure 2c/d were moved to a dedicated R script implementing
+    # minimum-jump-per-event Sankey/alluvial logic.
     write_table(replicon_hostrange_changes(df), outdir / "fig2_observed_replicon_hostrange_changes.tsv")
-    write_table(raw_events, outdir / "fig2c_observed_expansion_events_raw.tsv")
-    write_table(unique_events, outdir / "fig2c_observed_expansion_events_unique.tsv")
-    write_table(jump_counts, outdir / "fig2c_taxonomic_jump_counts.tsv")
-    write_table(transition_edges, outdir / "fig2d_transition_edges.tsv")
 
-    if taxonomy_df.empty:
-        print("[warn] Taxonomy table is empty. Figure 2c/d taxonomic jumps may be missing or unknown.")
-
-    print("[done] Section 2 analysis tables generated.")
+    print("[done] Section 2 (Figure 2a/2b + shared tables) generated. For Figure 2c/d, run 02_section2_hostrange_jumps_minimum_event.R")
 
 
 if __name__ == "__main__":
