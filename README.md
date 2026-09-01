@@ -285,7 +285,7 @@ python3 scripts/05_fusion_breakpoints/05e_section5_final_tables.py \
 
 This pipeline runs NUCmer, BLASTn, cd-hit-est and digIS and is
 resource-intensive. It produces containment events, paired breakpoint and
-random windows, best homology hits, homologous-tract clusters and IS
+random windows, best homology hits, homologous sequence clusters and IS
 architecture summaries.
 
 ## Quick example and tests
