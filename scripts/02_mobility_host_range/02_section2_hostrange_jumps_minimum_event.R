@@ -4,7 +4,20 @@ library(ggalluvial)
 # If SVG export fails, install this once:
 # install.packages("svglite")
 
-OUTDIR <- "sankey_minimum_taxonomic_jump"
+args <- commandArgs(trailingOnly = TRUE)
+
+INPUT_FILE <- if (length(args) >= 1) {
+  args[[1]]
+} else {
+  file.path("Supplementary_Datasets", "Supplementary_Dataset_2.xlsx")
+}
+
+OUTDIR <- if (length(args) >= 2) {
+  args[[2]]
+} else {
+  "sankey_minimum_taxonomic_jump"
+}
+
 dir.create(OUTDIR, showWarnings = FALSE, recursive = TRUE)
 
 jump_order <- c("family", "order", "class", "phylum")
@@ -13,109 +26,193 @@ jump_order <- c("family", "order", "class", "phylum")
 # LOAD
 # ============================================================
 
-df <- read.csv(
-  "Supplementary_Dataset_2.xlsx",
-  sep = "\t",
-  stringsAsFactors = FALSE
+read_supplementary_dataset_2 <- function(path) {
+  if (!file.exists(path)) {
+    stop("Supplementary Dataset 2 not found: ", path)
+  }
+
+  extension <- tolower(tools::file_ext(path))
+  if (extension %in% c("xlsx", "xls")) {
+    return(readxl::read_excel(path))
+  }
+
+  readr::read_tsv(path, show_col_types = FALSE)
+}
+
+df <- read_supplementary_dataset_2(INPUT_FILE)
+
+new_schema_cols <- c(
+  "event_id", "replicon", "new_genus",
+  "new_family", "new_order", "new_class", "new_phylum",
+  "baseline_families", "baseline_orders", "baseline_classes",
+  "baseline_phyla", "cointegrated_replicons", "taxonomic_jump"
 )
 
-required_cols <- c(
-  "replicon",
-  "baseline_family", "new_family",
-  "baseline_order", "new_order",
-  "baseline_class", "new_class",
-  "baseline_phylum", "new_phylum",
-  "n_events",
-  "cointegrating_replicons",
-  "taxonomic_jump"
+legacy_schema_cols <- c(
+  "replicon", "baseline_family", "new_family",
+  "baseline_order", "new_order", "baseline_class", "new_class",
+  "baseline_phylum", "new_phylum", "n_events",
+  "cointegrating_replicons", "taxonomic_jump"
 )
 
-missing_cols <- setdiff(required_cols, colnames(df))
+is_new_schema <- all(new_schema_cols %in% colnames(df))
+is_legacy_schema <- all(legacy_schema_cols %in% colnames(df))
 
-if (length(missing_cols) > 0) {
+if (!is_new_schema && !is_legacy_schema) {
+  missing_new <- setdiff(new_schema_cols, colnames(df))
+  missing_legacy <- setdiff(legacy_schema_cols, colnames(df))
   stop(
-    "Missing required columns: ",
-    paste(missing_cols, collapse = ", ")
+    "Unrecognised Supplementary Dataset 2 schema. ",
+    "Missing from current schema: ", paste(missing_new, collapse = ", "),
+    "; missing from legacy schema: ", paste(missing_legacy, collapse = ", ")
   )
 }
 
-df <- df %>%
+input_event_summary <- df %>%
   mutate(
-    n_events = as.numeric(n_events)
-  )
+    taxonomic_jump = as.character(taxonomic_jump),
+    event_id = if (is_new_schema) as.character(event_id) else as.character(row_number())
+  ) %>%
+  filter(!is.na(taxonomic_jump), taxonomic_jump != "") %>%
+  group_by(taxonomic_jump) %>%
+  summarise(n_events = n_distinct(event_id), .groups = "drop")
+
+readr::write_tsv(
+  input_event_summary,
+  file.path(OUTDIR, "all_input_events_by_taxonomic_level.tsv")
+)
 
 # ============================================================
 # CLEAN AND KEEP MINIMUM TAXONOMIC JUMP PER EVENT
 # ============================================================
 
-df2 <- df %>%
-  mutate(
-    taxonomic_jump = factor(
-      taxonomic_jump,
-      levels = jump_order,
-      ordered = TRUE
+if (is_new_schema) {
+  # The current dataset already contains one row per minimum host-range event.
+  # Baseline ranks are semicolon-delimited because an event may have several
+  # valid baseline taxa. Expand only the rank represented in each Sankey facet.
+  # Divide the event weight over those paths so one biological event still
+  # contributes a total weight of one after expansion.
+  df_plot <- df %>%
+    transmute(
+      event_id = as.character(event_id),
+      replicon = as.character(replicon),
+      taxonomic_jump = as.character(taxonomic_jump),
+      baseline_taxon = case_when(
+        taxonomic_jump == "family" ~ as.character(baseline_families),
+        taxonomic_jump == "order"  ~ as.character(baseline_orders),
+        taxonomic_jump == "class"  ~ as.character(baseline_classes),
+        taxonomic_jump == "phylum" ~ as.character(baseline_phyla),
+        TRUE ~ NA_character_
+      ),
+      new_taxon = case_when(
+        taxonomic_jump == "family" ~ as.character(new_family),
+        taxonomic_jump == "order"  ~ as.character(new_order),
+        taxonomic_jump == "class"  ~ as.character(new_class),
+        taxonomic_jump == "phylum" ~ as.character(new_phylum),
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(taxonomic_jump %in% jump_order) %>%
+    tidyr::separate_rows(baseline_taxon, sep = ";") %>%
+    mutate(
+      baseline_taxon = stringr::str_trim(baseline_taxon),
+      new_taxon = stringr::str_trim(new_taxon)
+    ) %>%
+    filter(
+      !is.na(event_id), event_id != "",
+      !is.na(baseline_taxon), baseline_taxon != "",
+      !is.na(new_taxon), new_taxon != "",
+      !is.na(replicon), replicon != ""
+    ) %>%
+    distinct(event_id, taxonomic_jump, baseline_taxon, replicon, new_taxon) %>%
+    group_by(event_id) %>%
+    mutate(n_events = 1 / n()) %>%
+    ungroup() %>%
+    mutate(
+      taxonomic_jump = factor(
+        taxonomic_jump,
+        levels = jump_order,
+        ordered = TRUE
+      )
     )
-  ) %>%
-  filter(!is.na(taxonomic_jump))
 
-# Event identity approximation:
-# replicon + destination taxonomy + cointegrating_replicons
-
-df_min_only <- df2 %>%
-  group_by(
-    replicon,
-    new_family,
-    new_order,
-    new_class,
-    new_phylum,
-    cointegrating_replicons
-  ) %>%
-  mutate(
-    minimum_jump_num = min(as.integer(taxonomic_jump), na.rm = TRUE),
-    minimum_jump = factor(
-      jump_order[minimum_jump_num],
-      levels = jump_order,
-      ordered = TRUE
+  excluded_genus_events <- input_event_summary %>%
+    filter(taxonomic_jump == "genus") %>%
+    pull(n_events)
+  if (length(excluded_genus_events) == 1 && excluded_genus_events > 0) {
+    message(
+      excluded_genus_events,
+      " genus-level events are included in the summary table but omitted ",
+      "from the Sankey because the event-level workbook has no baseline genus column."
     )
-  ) %>%
-  ungroup() %>%
-  filter(taxonomic_jump == minimum_jump) %>%
-  mutate(
-    taxonomic_jump = factor(
-      as.character(minimum_jump),
-      levels = jump_order,
-      ordered = TRUE
-    )
-  ) %>%
-  select(-minimum_jump_num, -minimum_jump)
+  }
+} else {
+  df2 <- df %>%
+    mutate(
+      n_events = as.numeric(n_events),
+      taxonomic_jump = factor(
+        taxonomic_jump,
+        levels = jump_order,
+        ordered = TRUE
+      )
+    ) %>%
+    filter(!is.na(taxonomic_jump))
 
-# ============================================================
-# CHOOSE TAXONOMIC LEVEL TO DISPLAY BY FACET
-# ============================================================
+  # Legacy event identity approximation:
+  # replicon + destination taxonomy + cointegrating_replicons.
+  df_min_only <- df2 %>%
+    group_by(
+      replicon,
+      new_family,
+      new_order,
+      new_class,
+      new_phylum,
+      cointegrating_replicons
+    ) %>%
+    mutate(
+      minimum_jump_num = min(as.integer(taxonomic_jump), na.rm = TRUE),
+      minimum_jump = factor(
+        jump_order[minimum_jump_num],
+        levels = jump_order,
+        ordered = TRUE
+      )
+    ) %>%
+    ungroup() %>%
+    filter(taxonomic_jump == minimum_jump) %>%
+    mutate(
+      taxonomic_jump = factor(
+        as.character(minimum_jump),
+        levels = jump_order,
+        ordered = TRUE
+      )
+    ) %>%
+    select(-minimum_jump_num, -minimum_jump)
 
-df_plot <- df_min_only %>%
-  mutate(
-    baseline_taxon = case_when(
-      taxonomic_jump == "family" ~ baseline_family,
-      taxonomic_jump == "order"  ~ baseline_order,
-      taxonomic_jump == "class"  ~ baseline_class,
-      taxonomic_jump == "phylum" ~ baseline_phylum,
-      TRUE ~ NA_character_
-    ),
-    new_taxon = case_when(
-      taxonomic_jump == "family" ~ new_family,
-      taxonomic_jump == "order"  ~ new_order,
-      taxonomic_jump == "class"  ~ new_class,
-      taxonomic_jump == "phylum" ~ new_phylum,
-      TRUE ~ NA_character_
+  df_plot <- df_min_only %>%
+    mutate(
+      event_id = as.character(row_number()),
+      baseline_taxon = case_when(
+        taxonomic_jump == "family" ~ baseline_family,
+        taxonomic_jump == "order"  ~ baseline_order,
+        taxonomic_jump == "class"  ~ baseline_class,
+        taxonomic_jump == "phylum" ~ baseline_phylum,
+        TRUE ~ NA_character_
+      ),
+      new_taxon = case_when(
+        taxonomic_jump == "family" ~ new_family,
+        taxonomic_jump == "order"  ~ new_order,
+        taxonomic_jump == "class"  ~ new_class,
+        taxonomic_jump == "phylum" ~ new_phylum,
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(
+      !is.na(baseline_taxon),
+      !is.na(new_taxon),
+      !is.na(replicon),
+      !is.na(n_events)
     )
-  ) %>%
-  filter(
-    !is.na(baseline_taxon),
-    !is.na(new_taxon),
-    !is.na(replicon),
-    !is.na(n_events)
-  )
+}
 
 # ============================================================
 # COLLAPSE FLOWS
