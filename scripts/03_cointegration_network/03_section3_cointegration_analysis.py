@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Section 3 analysis for Figure 3 and Supplementary Figure 6.
+Section 3 analysis for Figure 3 and Supplementary Figure 9.
 
 Manuscript section:
 "Non-random assembly of multireplicon plasmids"
@@ -29,7 +29,7 @@ Figure 3d:
   all pair × genus rows for pairs that are strong in at least one genus or
   switch between STRONG_COINTEGRATION and STRONG_REPULSION across genera.
 
-Supplementary Figure 6:
+Supplementary Figure 9:
 - Stability of cointegration rate across host genera:
     mean cointegration rate vs SD across genera.
 
@@ -536,7 +536,7 @@ def host_variation(by_genus: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Generate Figure 3 / Supplementary Figure 6 analysis tables."
+        description="Generate Figure 3 / Supplementary Figure 9 analysis tables."
     )
 
     ap.add_argument("--nuccore", required=True, help="meta/nuccore.csv")
@@ -586,9 +586,9 @@ def main() -> None:
     heatmap_table = heatmap_pairs_table(by_genus)
     write_table(heatmap_table, outdir / "fig3d_relevant_pairs_heatmap_table.tsv")
 
-    # Supplementary Figure 6.
+    # Supplementary Figure 9.
     variation = host_variation(by_genus)
-    write_table(variation, outdir / "suppfig6_cointegration_host_variation.tsv")
+    write_table(variation, outdir / "suppfig9_cointegration_host_variation.tsv")
 
     print("[done] Section 3 analysis tables generated.")
 

@@ -2,7 +2,7 @@
 """
 05b_breakpoint_homology_analysis.py
 
-Section 5 / Figure 5a and Supplementary Figures 8-10:
+Section 5 / Figure 5a and Supplementary Figures 14-15:
 Extract fusion-breakpoint windows and quantify homology between paired breakpoints.
 
 This script implements the manuscript step:

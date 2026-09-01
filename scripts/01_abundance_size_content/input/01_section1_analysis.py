@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Section 1 analysis for Figure 1 and Supplementary Figures 1–3.
+Section 1 analysis for Figure 1 and Supplementary Figures 2–4.
 
 This script does NOT export final figures. It generates the clean tables and
 statistical summaries needed for:
@@ -25,13 +25,13 @@ Figure 1f:
 - AMR gene density by class, genes/kb.
 - Mann–Whitney U tests, single-replicon vs multi-replicon.
 
-Supplementary Figure 1:
+Supplementary Figure 2:
 - Plasmid size distributions by number of replicons across genera.
 
-Supplementary Figure 2:
+Supplementary Figure 3:
 - Plasmid size vs number of replicons across genera, Spearman correlations.
 
-Supplementary Figure 3:
+Supplementary Figure 4:
 - Metal/biocide and virulence gene density by class.
 - Top 5 classes by abundance in multi-replicon plasmids + Other.
 - Mann–Whitney U tests with FDR correction.
@@ -559,7 +559,7 @@ def functional_density_by_class(
     top_n: int | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Density analysis used for Figure 1f and Supplementary Figure 3.
+    Density analysis used for Figure 1f and Supplementary Figure 4.
 
     category:
     - AMR: group contains AMR, class column split by '/', Biocide removed, top 10 + Other by default.
@@ -777,17 +777,17 @@ def main() -> None:
 
     write_table(master, outdir / "section1_master_table.tsv")
 
-    # Figure 1a–d and Supplementary Figures 1–2 inputs/stats.
+    # Figure 1a–d and Supplementary Figures 2–3 inputs/stats.
     write_table(overall_counts(master), outdir / "fig1_overall_counts.tsv")
     write_table(prevalence_by_genus(master), outdir / "fig1a_prevalence_by_genus.tsv")
     write_table(size_distribution_table(master), outdir / "fig1b_size_distribution_table.tsv")
     write_table(spearman_global(master), outdir / "fig1c_spearman_global.tsv")
     write_table(length_additivity(master), outdir / "fig1d_length_additivity.tsv")
-    write_table(size_distribution_table(master), outdir / "suppfig1_size_distribution_by_genus_table.tsv")
-    write_table(spearman_by_genus(master), outdir / "suppfig2_spearman_by_genus.tsv")
+    write_table(size_distribution_table(master), outdir / "suppfig2_size_distribution_by_genus_table.tsv")
+    write_table(spearman_by_genus(master), outdir / "suppfig3_spearman_by_genus.tsv")
 
     if not args.functional_table:
-        print("[info] No functional table provided; skipping Figure 1e, Figure 1f, and Supplementary Figure 3.")
+        print("[info] No functional table provided; skipping Figure 1e, Figure 1f, and Supplementary Figure 4.")
         return
 
     functional = load_functional_table(args.functional_table)
@@ -812,7 +812,7 @@ def main() -> None:
     write_table(amr_density, outdir / "fig1f_amr_density_by_class_long.tsv")
     write_table(amr_stats, outdir / "fig1f_amr_density_by_class_stats.tsv")
 
-    # Supplementary Figure 3: metal/biocide and virulence density by class.
+    # Supplementary Figure 4: metal/biocide and virulence density by class.
     metal_density, metal_stats = functional_density_by_class(
         master,
         functional,
@@ -836,12 +836,12 @@ def main() -> None:
         ignore_index=True,
     ) if (not metal_stats.empty or not vir_stats.empty) else pd.DataFrame()
 
-    write_table(metal_density, outdir / "suppfig3_metal_biocide_density_by_class_long.tsv")
-    write_table(metal_stats, outdir / "suppfig3_metal_biocide_density_by_class_stats.tsv")
-    write_table(vir_density, outdir / "suppfig3_virulence_density_by_class_long.tsv")
-    write_table(vir_stats, outdir / "suppfig3_virulence_density_by_class_stats.tsv")
-    write_table(supp_density, outdir / "suppfig3_density_by_class_long.tsv")
-    write_table(supp_stats, outdir / "suppfig3_density_by_class_stats.tsv")
+    write_table(metal_density, outdir / "suppfig4_metal_biocide_density_by_class_long.tsv")
+    write_table(metal_stats, outdir / "suppfig4_metal_biocide_density_by_class_stats.tsv")
+    write_table(vir_density, outdir / "suppfig4_virulence_density_by_class_long.tsv")
+    write_table(vir_stats, outdir / "suppfig4_virulence_density_by_class_stats.tsv")
+    write_table(supp_density, outdir / "suppfig4_density_by_class_long.tsv")
+    write_table(supp_stats, outdir / "suppfig4_density_by_class_stats.tsv")
 
     if "genus" not in master.columns:
         print("[warn] No metadata/genus provided; Figure 1a and genus-stratified summaries are empty.")

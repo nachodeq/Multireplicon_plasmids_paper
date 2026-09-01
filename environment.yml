@@ -1,0 +1,27 @@
+name: multireplicon-plasmids
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python
+  - pandas
+  - numpy
+  - scipy
+  - statsmodels
+  - networkx
+  - python-louvain
+  - biopython
+  - openpyxl
+  - ete3
+  - mash
+  - muscle
+  - mafft
+  - blast
+  - mummer4
+  - cd-hit=4.8.1
+  - r-base
+  - r-ape
+  - r-phangorn
+  - r-vegan
+  - r-tidyverse
+  - r-ggalluvial
