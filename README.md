@@ -1,7 +1,7 @@
 # Multireplicon plasmids analysis code
 
 Code and supplementary datasets for *Multireplicon plasmids are enriched in
-antimicrobial resistance genes and transfer-associated features and show
+antimicrobial resistance genes and transfer associated features and show
 broader observed host distributions* (de Quinto et al.).
 
 The repository is organized in manuscript order. Analysis scripts generate
