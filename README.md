@@ -32,7 +32,6 @@ conda env create -f environment.yml
 conda activate multireplicon-plasmids
 ```
 
-Versions verified from the manuscript or retained analysis metadata:
 
 | Software/data | Version |
 |---|---|
@@ -45,29 +44,22 @@ Versions verified from the manuscript or retained analysis metadata:
 | cd-hit-est | 4.8.1 |
 | digIS | 1.2 |
 
-Versions of Mash, MOB-suite/MOB-typer and BLAST were not recorded in the
-available execution metadata and are therefore not assigned a version here.
-The Conda file specifies the required packages without inventing versions.
 
 ## Input data
 
 The four supplementary datasets are included under `Supplementary_Datasets/`.
-Full reruns additionally require data that are too large to distribute in Git:
+Full reruns additionally require data that are too large to distribute in Git, if needed, request them at idequintoc@gmail.com:
 
 - PLSDB `2024_05_31_v2` plasmid nucleotide and predicted-protein FASTA files;
 - PLSDB/MOB-typer typing and metadata tables;
 - MOB-typer per-plasmid summaries and `replicon_blast_results.txt` files;
-- precomputed native ConjScan Likely-System calls for the 23,925 representative
+- precomputed ConjScan Likely-System calls for the 23,925 representative
   plasmids;
 - the precomputed AllTheBacteria target-species table (1,863,797 unique
   assemblies) and consolidated MOB-typer master table (2,763,297 unique
   assemblies overall);
-- original plasmid FASTA sequences for phylogenetic, flanking-context and
-  breakpoint analyses;
-- local taxonomy data used by `ete3.NCBITaxa`.
 
-Input paths are supplied as command-line arguments. Scripts contain no
-personal absolute paths.
+Input paths are supplied as command-line arguments. 
 
 ## Execution order
 
@@ -91,8 +83,6 @@ calculations and is resource-intensive.
 
 ### 1. Abundance, size and genetic content
 
-The included representative dataset is sufficient for the basic abundance and
-length summaries:
 
 ```bash
 python3 scripts/01_abundance_size_content/input/01_section1_analysis.py \
@@ -104,8 +94,7 @@ python3 scripts/01_abundance_size_content/input/01_section1_analysis.py \
 ```
 
 The script writes the Figure 1 and Supplementary Figure 2–4 source tables and
-their statistical summaries. Omitting optional metadata, typing or functional
-inputs skips the dependent outputs and still permits the quick example.
+their statistical summaries. 
 
 Source-adjusted binomial GLMs are run with:
 
@@ -122,7 +111,7 @@ python3 scripts/01_abundance_size_content/01c_prepare_genus_source_tables.py \
 ```
 
 These steps produce nested GLM coefficients, adjusted odds ratios, source
-summaries, top-25-genus prevalence and exact binomial confidence intervals.
+summaries, top-25-genus prevalence and binomial confidence intervals.
 
 ### 2. Mobility, ConjScan and observed host distributions
 
@@ -133,9 +122,6 @@ python3 scripts/02_mobility_host_range/02_section2_mobility_hostrange_analysis.p
   --taxonomy data/taxonomy.tsv \
   --outdir results/02_mobility_host_range
 ```
-
-Native ConjScan calls are summarized without reclassifying the exact
-`CONJScan/Plasmids` model names:
 
 ```bash
 python3 scripts/02_mobility_host_range/02b_prepare_conjscan_native.py \
@@ -172,10 +158,7 @@ python3 scripts/02_mobility_host_range/02f_validate_host_range_jumps_atb.py \
 ```
 
 These stages process precomputed outputs and do not launch ConjScan, MOB-typer
-or distributed AllTheBacteria jobs. Processing is resource-intensive because
-the complete PLSDB table and the consolidated AllTheBacteria master table are
-large. The species-call join restricts the master table to the 1,863,797 target
-assemblies used in the analysis. The ConjScan result table supplied to
+or distributed AllTheBacteria jobs. The ConjScan result table supplied to
 `02b_prepare_conjscan_native.py` was generated with MacSyFinder 2.1.6,
 MacSyLib 1.0.4, CONJScan 2.1.0, `CONJScan/Plasmids` and
 `--db-type unordered`.
@@ -316,7 +299,4 @@ Run all fast integrity checks with:
 python3 -m unittest discover -s tests -v
 ```
 
-The tests validate Python syntax, absence of personal paths, the schema and
-row count of Supplementary Dataset 1, unique plasmid identifiers and the
-published representative-set counts. They do not rerun resource-intensive
-analyses.
+
