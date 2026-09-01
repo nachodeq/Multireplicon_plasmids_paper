@@ -2,7 +2,7 @@
 """
 05d_summarize_digis_is_architecture.py
 
-Section 5 / Figure 5b-c and Supplementary Figures 12-13:
+Section 5 / Figure 5b-c and Supplementary Figures 17-18:
 Summarize insertion sequences detected by digIS in paired breakpoint windows.
 
 This script implements:

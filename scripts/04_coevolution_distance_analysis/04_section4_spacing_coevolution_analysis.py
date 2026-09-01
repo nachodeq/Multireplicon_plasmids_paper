@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Section 4 analysis for Figure 4 and Supplementary Figure 7.
+Section 4 analysis for Figure 4 and Supplementary Figure 12.
 
 Manuscript section:
 "Stable associations of replicons show signs of coevolution"
 
 This script is intentionally narrow. It generates only the analysis tables/statistical
-summaries needed for Figure 4 and Supplementary Figure 7. It does not export final figures.
+summaries needed for Figure 4 and Supplementary Figure 12. It does not export final figures.
 
 It covers:
 
@@ -29,7 +29,7 @@ Figure 4f:
 - Optional paired comparison of Mantel r for the same replicon pairs in
   multireplicon plasmids vs separate single-replicon plasmids.
 
-Supplementary Figure 7:
+Supplementary Figure 12:
 - Relationship between median relative distance and Mantel r.
 - Spearman correlation.
 
@@ -712,7 +712,7 @@ def mantel_control_test(control: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Generate Figure 4 / Supplementary Figure 7 analysis tables."
+        description="Generate Figure 4 / Supplementary Figure 12 analysis tables."
     )
 
     ap.add_argument("--distances", default=None, help="Existing replicon_distances.tsv.")
@@ -802,7 +802,7 @@ def main() -> None:
             y_col="mantel_r",
             comparison="median_relative_distance_vs_mantel_r",
         ),
-        outdir / "suppfig7_median_distance_vs_mantel_spearman.tsv",
+        outdir / "suppfig12_median_distance_vs_mantel_spearman.tsv",
     )
 
     if args.mantel_control:

@@ -2,7 +2,7 @@
 """
 05c_run_digis_on_windows.py
 
-Section 5 / Figure 5b-c and Supplementary Figures 12-13:
+Section 5 / Figure 5b-c and Supplementary Figures 17-18:
 Run digIS on breakpoint-centered windows and matched random-control windows.
 
 This is a thin, reproducible wrapper around digIS. It replaces fixed-path shell scripts

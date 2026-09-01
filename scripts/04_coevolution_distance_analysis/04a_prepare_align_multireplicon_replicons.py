@@ -4,7 +4,7 @@
 
 Prepare and align replicon sequences for the multireplicon Mantel analysis.
 
-This replaces the old combination of:
+This consolidates the functions of:
 - fetchallpairs.py
 - run_aligns.sh
 

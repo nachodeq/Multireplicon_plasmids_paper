@@ -4,7 +4,7 @@
 
 Prepare and align replicon sequences for the separate-plasmid control Mantel analysis.
 
-This replaces the old combination of:
+This consolidates the functions of:
 - buildusablepairs.py
 - fetchfastas2.py
 - control alignment helper scripts
