@@ -34,9 +34,9 @@ accession and short-window limitations are documented, not silently repaired.
 
  ## System requirements
   
-    - **Operating system:** Linux (tested on Ubuntu 22.04 LTS, x86_64 architecture). Standard POSIX environments (macOS/Linux) supporting Conda.
-    - **Tested software environments:** Python 3.10+, R 4.3+, Conda / Mamba.
-    - **Hardware requirements:** No non-standard hardware is required. A standard desktop computer (8–16 GB RAM) is sufficient to run the example demo and summary tables.
+    - Operating system: Linux (tested on Ubuntu 22.04 LTS, x86_64 architecture). Standard POSIX environments (macOS/Linux) supporting Conda.
+    - Tested software environments: Python 3.10+, R 4.3+, Conda / Mamba.
+    - Hardware requirements: No non-standard hardware is required. A standard desktop computer (8–16 GB RAM) is sufficient to run the example demo and summary tables.
   
  ## Installation
   
