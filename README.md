@@ -32,14 +32,23 @@ precomputed inputs; this is not an end-to-end ATB processing release. Unit tests
 and compilation alone do not reproduce the paper. Upstream historical breakpoint
 accession and short-window limitations are documented, not silently repaired.
 
-## Installation
+ ## System requirements
+  
+    - **Operating system:** Linux (tested on Ubuntu 22.04 LTS, x86_64 architecture). Standard POSIX environments (macOS/Linux) supporting Conda.
+    - **Tested software environments:** Python 3.10+, R 4.3+, Conda / Mamba.
+    - **Hardware requirements:** No non-standard hardware is required. A standard desktop computer (8–16 GB RAM) is sufficient to run the example demo and summary tables. Full raw re-analyses (e.g., all-vs-all Mash clustering and      
+  whole-database NUCmer containment) benefit from a multi-core workstation/server with $\ge$ 32 GB RAM.
+  
+    ## Installation
+  
+    ```bash
+    git clone https://github.com/nachodeq/Multireplicon_plasmids_paper.git
+    cd Multireplicon_plasmids_paper
+    conda env create -f environment.yml
+    conda activate multireplicon-plasmids
+  
+  Typical install time: Approximately 5–10 minutes on a standard desktop computer with broadband internet connection.
 
-```bash
-git clone https://github.com/nachodeq/Multireplicon_plasmids_paper.git
-cd Multireplicon_plasmids_paper
-conda env create -f environment.yml
-conda activate multireplicon-plasmids
-```
 
 
 | Software/data | Version |
