@@ -11,7 +11,10 @@ This script implements:
     then distance to breakpoint,
     then score,
     then e-value.
-- Pair classification:
+- Map selected hits through the actual circular window origin/length.
+- Preserve raw classes; recode overlapping same- or different-label hits as one
+  IS-associated region, for real and random controls alike.
+- Corrected pair classification:
     0 IS
     1 IS
     2 IS (same)
@@ -54,6 +57,9 @@ outdir/
 from __future__ import annotations
 
 import argparse
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "shared"))
+from revision_utils import annotate_windows, correct_pair_regions
 from pathlib import Path
 
 import numpy as np
@@ -197,9 +203,23 @@ def summarize_classes(pair_df: pd.DataFrame, dataset: str) -> pd.DataFrame:
     return out[["dataset", "IS_class", "n_pairs", "fraction", "percentage"]]
 
 
-def build_pair_classification(master_path: Path, digis_csv: Path, dataset: str):
+def build_pair_classification(master_path: Path, digis_csv: Path, dataset: str, convention=None):
+    master = annotate_windows(pd.read_csv(master_path, sep="\t"), convention)
     base = pair_base_from_master(master_path)
     raw = read_digis_csv(digis_csv)
+    keyed = master.set_index(["pair_id", "bp_kind"])
+    for hit in raw.itertuples():
+        key = (hit.pair_id, hit.bp_kind)
+        if key not in keyed.index:
+            raise ValueError("digIS hit has no window metadata")
+        window = keyed.loc[key]
+        if hit.plasmid != window.plasmid or hit.window_hw != window.window_hw or hit.breakpoint_pos_genome != window.breakpoint_pos:
+            raise ValueError("digIS header and window metadata disagree")
+    if "breakpoint_window_position" in master and not raw.empty:
+        positions = master.set_index(["pair_id", "bp_kind"]).breakpoint_window_position
+        raw["breakpoint_pos_window"] = [positions.loc[(r.pair_id, r.bp_kind)] for r in raw.itertuples()]
+        raw["bp_inside"] = (raw._start <= raw.breakpoint_pos_window) & (raw._end >= raw.breakpoint_pos_window)
+        raw["dist_to_bp"] = np.where(raw.bp_inside, 0, np.minimum(abs(raw._start-raw.breakpoint_pos_window), abs(raw._end-raw.breakpoint_pos_window)))
     best = choose_best_hit_per_breakpoint(raw)
 
     if best.empty:
@@ -249,6 +269,7 @@ def build_pair_classification(master_path: Path, digis_csv: Path, dataset: str):
         pair["end_has_is"] = pair["end_is_name_norm"].notna()
 
     pair["IS_class"] = pair.apply(classify_pair, axis=1)
+    pair = correct_pair_regions(pair, master)
     pair["IS_orientation"] = pair.apply(orientation_from_strand, axis=1)
     pair["dataset"] = dataset
 
@@ -261,6 +282,7 @@ def main() -> None:
     ap.add_argument("--breakpoints-digis-csv", required=True)
     ap.add_argument("--random-master", default=None)
     ap.add_argument("--random-digis-csv", default=None)
+    ap.add_argument("--coordinate-convention", choices=["legacy-inclusive", "exact-2hw"], help="Only for masters without explicit window geometry; short legacy windows require explicit metadata")
     ap.add_argument("--outdir", required=True)
     args = ap.parse_args()
 
@@ -270,7 +292,7 @@ def main() -> None:
     raw, best, pair = build_pair_classification(
         Path(args.breakpoints_master),
         Path(args.breakpoints_digis_csv),
-        dataset="breakpoints",
+        dataset="breakpoints", convention=args.coordinate_convention,
     )
 
     raw.to_csv(outdir / "digis_breakpoint_raw_hits.tsv", sep="\t", index=False)
@@ -304,7 +326,7 @@ def main() -> None:
         raw_r, best_r, pair_r = build_pair_classification(
             Path(args.random_master),
             Path(args.random_digis_csv),
-            dataset="random",
+            dataset="random", convention=args.coordinate_convention,
         )
 
         raw_r.to_csv(outdir / "digis_random_raw_hits.tsv", sep="\t", index=False)

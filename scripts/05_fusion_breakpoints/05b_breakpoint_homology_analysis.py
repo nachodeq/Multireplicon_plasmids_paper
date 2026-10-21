@@ -309,6 +309,9 @@ def main() -> None:
                 "bp_kind": kind,
                 "breakpoint_pos": pos,
                 "window_hw": args.half_window,
+                "window_start_genome": ((pos - args.half_window - 1) % L) + 1,
+                "window_length": len(wseq),
+                "breakpoint_window_position": args.half_window + 1,
                 "sid": sid,
                 "plasmid_len": L,
             })
@@ -348,6 +351,9 @@ def main() -> None:
                 "bp_kind": kind,
                 "breakpoint_pos": pos,
                 "window_hw": args.half_window,
+                "window_start_genome": ((pos - args.half_window - 1) % L) + 1,
+                "window_length": len(wseq),
+                "breakpoint_window_position": args.half_window + 1,
                 "sid": sid,
                 "plasmid_len": L,
             })

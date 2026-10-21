@@ -23,6 +23,15 @@ tests/                                  Fast repository integrity tests
 environment.yml                         Conda environment specification
 ```
 
+## Revised analyses and reproduction status
+
+See [the revision reproducibility guide](docs/REVISION_REPRODUCIBILITY.md) for the
+independent OriTDB+CONJScan classification, corrected gene covariate, coordinate-aware
+IS correction, input schemas and verified metrics. Existing ATB validation consumes
+precomputed inputs; this is not an end-to-end ATB processing release. Unit tests
+and compilation alone do not reproduce the paper. Upstream historical breakpoint
+accession and short-window limitations are documented, not silently repaired.
+
 ## Installation
 
 ```bash
@@ -96,12 +105,18 @@ python3 scripts/01_abundance_size_content/input/01_section1_analysis.py \
 The script writes the Figure 1 and Supplementary Figure 2–4 source tables and
 their statistical summaries. 
 
+Source-adjusted binomial GLMs require the independent four-category mobility
+assignments from stage 2 below first. The legacy Excel mobility column is never
+used as the adjusted covariate. Alternatively, supply `--model-data` with the
+original model cohort/covariates instead of the two workbook arguments.
+
 Source-adjusted binomial GLMs are run with:
 
 ```bash
 python3 scripts/01_abundance_size_content/01b_source_adjusted_glm.py \
   --supplementary-dataset Supplementary_Datasets/Supplementary_Dataset_1.xlsx \
   --plasmids-data data/Plasmids_data_ok.xlsx \
+  --mobility-table results/02_independent_mobility/outputs/plasmid_summary.tsv \
   --outdir results/01_source_adjusted_glm \
   --min-genus-n 200 --min-mobility-n 20
 
@@ -114,6 +129,17 @@ These steps produce nested GLM coefficients, adjusted odds ratios, source
 summaries, top-25-genus prevalence and binomial confidence intervals.
 
 ### 2. Mobility, ConjScan and observed host distributions
+
+The independent mobility builder requires a fresh, absent or empty output
+directory; failed runs must not be retried into their intermediate directory.
+Native count-table columns are checked against the supplied complete-system XML
+definitions before output creation.
+
+The **current default** independent four-category builder and its models are
+`02g_independent_mobility.py` and `02h_independent_mobility_glm.py`; follow the
+[cached-evidence or native-input commands](docs/REVISION_REPRODUCIBILITY.md).
+The MOB-typer commands below are retained as legacy sensitivity analyses, not
+the current Figure 2a classification.
 
 ```bash
 python3 scripts/02_mobility_host_range/02_section2_mobility_hostrange_analysis.py \
@@ -242,8 +268,8 @@ python3 scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel
   --fasta-dir data/plasmid_fastas \
   --outdir results/04_flanking_context \
   --flanks 500,1000,2000,4000,8000 \
-  --kmer 15 --min-n 5 --max-n 200 \
-  --permutations 199 --seed 20260702
+  --kmer 15 --min-n 5 --max-n 100 \
+  --permutations 99 --context-only-permutations --seed 20260702
 ```
 
 Alignment, tree reconstruction and permutation tests are resource-intensive.
@@ -264,16 +290,21 @@ python3 scripts/05_fusion_breakpoints/05b_breakpoint_homology_analysis.py \
   --half-window 500 --min-pident 95 --seed 42 \
   --run-cdhit --cdhit-identity 0.95
 
+python3 scripts/05_fusion_breakpoints/05g_extract_is_windows.py \
+  --containment-events results/05_containment/containment_events.tsv \
+  --fasta-dir data/plasmid_fastas --outdir results/05_is_windows \
+  --half-window 2000 --seed 12345
+
 python3 scripts/05_fusion_breakpoints/05c_run_digis_on_windows.py \
-  --breakpoint-windows results/05_homology/breakpoints_windows.fa \
-  --random-windows results/05_homology/random_windows.fa \
+  --breakpoint-windows results/05_is_windows/breakpoints_windows.fa \
+  --random-windows results/05_is_windows/random_windows.fa \
   --digis-script /path/to/digIS_search.py \
   --outdir results/05_digis
 
 python3 scripts/05_fusion_breakpoints/05d_summarize_digis_is_architecture.py \
-  --breakpoints-master results/05_homology/breakpoints_master.tsv \
+  --breakpoints-master results/05_is_windows/breakpoints_master.tsv \
   --breakpoints-digis-csv results/05_digis/breakpoints/digis_output/results/breakpoints_windows.csv \
-  --random-master results/05_homology/random_windows_master.tsv \
+  --random-master results/05_is_windows/random_master.tsv \
   --random-digis-csv results/05_digis/random/digis_output/results/random_windows.csv \
   --outdir results/05_digis_summary
 

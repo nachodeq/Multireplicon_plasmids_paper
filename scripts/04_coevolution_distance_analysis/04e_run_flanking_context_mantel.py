@@ -57,8 +57,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--flanks", default="500,1000,2000,4000,8000")
     p.add_argument("--kmer", type=int, default=15)
     p.add_argument("--min-n", type=int, default=5)
-    p.add_argument("--max-n", type=int, default=200)
-    p.add_argument("--permutations", type=int, default=199)
+    p.add_argument("--max-n", type=int, default=100)
+    p.add_argument("--permutations", type=int, default=99)
     p.add_argument(
         "--context-only-permutations",
         action="store_true",

@@ -2,6 +2,10 @@
 """Source-adjusted GLMs for multireplicon gene-content enrichment."""
 
 import argparse
+import sys
+import json
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "shared"))
+from revision_utils import join_mobility
 from pathlib import Path
 import re
 import warnings
@@ -192,6 +196,9 @@ def fit_glm(df, outcome, model_name, formula):
             "outcome": outcome,
             "term": fit.params.index,
             "coef": fit.params.values,
+            "SE": fit.bse.values,
+            "nonfinite_CI": ~np.isfinite(np.exp(conf[0].values)) | ~np.isfinite(np.exp(conf[1].values)),
+            "large_SE": fit.bse.values > 100,
             "OR": np.exp(fit.params.values),
             "CI_low": np.exp(conf[0].values),
             "CI_high": np.exp(conf[1].values),
@@ -337,9 +344,11 @@ def write_tables(main):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--supplementary-dataset", required=True,
+    parser.add_argument("--model-data", help="Precomputed model TSV; preserve all non-mobility covariates.")
+    parser.add_argument("--mobility-table", required=True, help="Independent OriTDB+CONJScan plasmid_summary.tsv")
+    parser.add_argument("--supplementary-dataset",
                         help="Supplementary Dataset 1 workbook.")
-    parser.add_argument("--plasmids-data", required=True,
+    parser.add_argument("--plasmids-data",
                         help="Workbook containing metadata and gene-count sheets.")
     parser.add_argument("--outdir", required=True)
     parser.add_argument("--min-genus-n", type=int, default=200)
@@ -351,14 +360,21 @@ def main():
     global OUT, SD1, PLASMIDS_DATA, MIN_GENUS_N, MIN_MOBILITY_N
     args = parse_args()
     OUT = Path(args.outdir)
-    SD1 = Path(args.supplementary_dataset)
-    PLASMIDS_DATA = Path(args.plasmids_data)
+    SD1 = Path(args.supplementary_dataset) if args.supplementary_dataset else None
+    PLASMIDS_DATA = Path(args.plasmids_data) if args.plasmids_data else None
     MIN_GENUS_N = args.min_genus_n
     MIN_MOBILITY_N = args.min_mobility_n
     OUT.mkdir(parents=True, exist_ok=True)
-    df = build_model_df()
+    if not args.model_data and (SD1 is None or PLASMIDS_DATA is None):
+        raise ValueError("Provide --model-data or both source workbooks")
+    df = pd.read_csv(args.model_data, sep="\t") if args.model_data else build_model_df()
+    df, audit = join_mobility(df, pd.read_csv(args.mobility_table, sep="\t"))
+    df.to_csv(OUT / "model_df_clean_for_source_adjusted_GLM.tsv", sep="\t", index=False)
+    (OUT / "mobility_input_audit.json").write_text(json.dumps(audit, indent=2))
     write_source_summary(df)
     main_results = run_models(df)
+    if not main_results["converged"].all():
+        raise RuntimeError("Nonconverged models; outputs are diagnostic, not validated results")
     write_tables(main_results)
     paper = pd.read_csv(OUT / "paper_table_main_source_adjusted_GLM.tsv", sep="\t")
     print(paper.to_string(index=False))
