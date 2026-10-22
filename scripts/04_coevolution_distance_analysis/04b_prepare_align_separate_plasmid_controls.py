@@ -27,6 +27,7 @@ It does NOT:
 from __future__ import annotations
 
 import argparse
+import sys
 import ast
 import os
 import re
@@ -40,13 +41,16 @@ from typing import Iterable
 import pandas as pd
 from Bio import SeqIO
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'shared'))
+from replicon_markers import assigned_references,final_markers,native_path,native_functions,extract_sequence,write_provenance,resolve_cached_id,find_nucleotide_fasta
+
 
 # ============================================================
 # Helpers
 # ============================================================
 
 def clean_tag(s: object) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(s).strip())
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(s).strip())
 
 
 def basename_noext(x: object) -> str:
@@ -87,7 +91,7 @@ def parse_reps(x: object) -> list[str]:
 
 def canon_pair(a: object, b: object) -> str:
     a, b = sorted([str(a).strip(), str(b).strip()])
-    return f"{a}__{b}"
+    return f"{clean_tag(a)}__{clean_tag(b)}"
 
 
 def clean_mantel_rep(x: object) -> str:
@@ -127,12 +131,8 @@ def index_fastas(fasta_dir: Path) -> dict[str, Path]:
     return idx
 
 
-def find_fasta(plasmid_id: str, fasta_index: dict[str, Path], fasta_dir: Path) -> Path | None:
-    b = basename_noext(plasmid_id)
-    if b in fasta_index:
-        return fasta_index[b]
-    matches = list(fasta_dir.glob(f"*{b}*"))
-    return matches[0] if matches else None
+def find_fasta(plasmid_id,fasta_index,fasta_dir):
+    return find_nucleotide_fasta(plasmid_id,fasta_dir)
 
 
 def read_single_sequence(fasta_path: Path):
@@ -140,53 +140,13 @@ def read_single_sequence(fasta_path: Path):
     if not seqs:
         raise ValueError(f"No sequences found in FASTA: {fasta_path}")
     if len(seqs) > 1:
-        print(f"[warn] {fasta_path} has {len(seqs)} records; using first record.")
+        raise ValueError(f"Expected one nucleotide FASTA record: {fasta_path}")
     return seqs[0]
 
 
-def find_best_hit_for_replicon(blast_df: pd.DataFrame, rep_type: str) -> pd.Series | None:
-    if "qseqid" not in blast_df.columns:
-        raise ValueError("replicon_blast_results.txt lacks qseqid column")
-
-    # In the control scripts, rep_type was matched directly against qseqid.
-    # This preserves that behavior.
-    matches = blast_df[blast_df["qseqid"].astype(str).str.contains(rep_type, na=False, regex=False)].copy()
-
-    # Fallback: more permissive token matching for qseqid strings containing normalized names.
-    if matches.empty:
-        token = clean_tag(rep_type)
-        matches = blast_df[blast_df["qseqid"].astype(str).str.contains(token, na=False, regex=False)].copy()
-
-    if matches.empty and "sseqid" in blast_df.columns:
-        matches = blast_df[blast_df["sseqid"].astype(str).str.contains(rep_type, na=False, regex=False)].copy()
-
-    if matches.empty:
-        return None
-
-    if "bitscore" in matches.columns:
-        matches["bitscore"] = pd.to_numeric(matches["bitscore"], errors="coerce")
-        if matches["bitscore"].notna().any():
-            return matches.loc[matches["bitscore"].idxmax()]
-
-    return matches.iloc[0]
-
-
-def extract_hit_sequence(seq_record, hit: pd.Series):
-    sstart = int(hit["sstart"])
-    send = int(hit["send"])
-    sstrand = str(hit.get("sstrand", "plus"))
-    seq_len = len(seq_record.seq)
-
-    if sstart < 1 or send < 1 or sstart > seq_len or send > seq_len:
-        raise ValueError(f"Coordinates out of range: {sstart}-{send}; plasmid length={seq_len}")
-
-    a = min(sstart, send) - 1
-    b = max(sstart, send)
-    subseq = seq_record.seq[a:b]
-    if sstrand.lower() == "minus":
-        subseq = subseq.reverse_complement()
-
-    return subseq, sstart, send, sstrand
+def extract_hit_sequence(seq_record,hit):
+    sequence=extract_sequence(seq_record.seq,hit)
+    return sequence,int(hit.sstart),int(hit.send),str(hit.sstrand)
 
 
 def run_alignment(input_fasta: Path, output_fasta: Path, threads: int = 8, aligner: str = "auto") -> str:
@@ -367,15 +327,22 @@ def main() -> None:
     ap.add_argument("--typing", required=True)
     ap.add_argument("--mantel-results", required=True, help="Multireplicon Mantel results; used to identify target pairs.")
     ap.add_argument("--mobtyper-dir", required=True)
+    ap.add_argument("--mob-suite-utils", type=Path, help="Native MOB-suite 3.1.9 utils.py; otherwise use installed mob_suite.")
     ap.add_argument("--fasta-dir", required=True)
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--aligner", choices=["auto", "muscle", "mafft"], default="auto")
     ap.add_argument("--skip-align", action="store_true")
     args = ap.parse_args()
+    utils_path=native_path(args.mob_suite_utils)
+    native=native_functions(str(utils_path))
+    marker_cache={}
 
     outdir = Path(args.outdir)
+    if outdir.exists() and any(outdir.iterdir()):
+        raise SystemExit("Use a new or empty output directory; do not mix corrected markers with previous extraction outputs.")
     outdir.mkdir(parents=True, exist_ok=True)
+    write_provenance(outdir,utils_path)
 
     mobtyper_dir = Path(args.mobtyper_dir)
     fasta_dir = Path(args.fasta_dir)
@@ -417,6 +384,7 @@ def main() -> None:
 
         for label, rep, plasmid_id in jobs:
             try:
+                plasmid_id=resolve_cached_id(plasmid_id,mobtyper_dir)
                 blast_file = mobtyper_dir / f"{plasmid_id}_analysis" / "replicon_blast_results.txt"
                 if not blast_file.exists():
                     raise FileNotFoundError(f"Missing BLAST file: {blast_file}")
@@ -426,14 +394,11 @@ def main() -> None:
                     raise FileNotFoundError(f"Missing FASTA for plasmid: {plasmid_id}")
 
                 seq_record = read_single_sequence(fasta_path)
-                blast_df = pd.read_csv(blast_file, sep="\t", dtype=str)
-                for c in ["sstart", "send", "bitscore"]:
-                    if c in blast_df.columns:
-                        blast_df[c] = pd.to_numeric(blast_df[c], errors="coerce")
-
-                hit = find_best_hit_for_replicon(blast_df, rep)
-                if hit is None:
-                    raise ValueError(f"No BLAST hit found for replicon {rep}")
+                if plasmid_id not in marker_cache:
+                    marker_cache[plasmid_id]=final_markers(mobtyper_dir,plasmid_id,native)
+                assignments,chosen=marker_cache[plasmid_id]
+                if rep not in assignments:raise ValueError(f'Cached final MOB summary does not assign type {rep}')
+                hit=chosen[rep]
 
                 subseq, sstart, send, sstrand = extract_hit_sequence(seq_record, hit)
                 tag = clean_tag(rep)
@@ -442,7 +407,7 @@ def main() -> None:
                 with open(out_fa, "w") as oh:
                     oh.write(
                         f">{row.ASSEMBLY_ACC}|{rep}|plasmid:{plasmid_id}|"
-                        f"qseqid:{hit.get('qseqid','')}|sstart:{sstart}|send:{send}|sstrand:{sstrand}\n"
+                        f"qseqid:{hit.get('qseqid','')}|sstart:{sstart}|send:{send}|sstrand:{sstrand}|plasmid_length:{len(seq_record.seq)}|marker_selection:final_MOB_HSP\n"
                     )
                     oh.write(str(subseq) + "\n")
 
@@ -453,6 +418,10 @@ def main() -> None:
                     "source_plasmid": plasmid_id,
                     "source_fasta": str(fasta_path),
                     "blast_file": str(blast_file),
+                    "rep_accession": assignments[rep],
+                    "qseqid": str(hit.qseqid),
+                    "bitscore": float(hit.bitscore),
+                    "plasmid_length": len(seq_record.seq),
                     "sstart": sstart,
                     "send": send,
                     "sstrand": sstrand,
@@ -471,6 +440,9 @@ def main() -> None:
                 })
 
     pd.DataFrame(extraction_rows).to_csv(outdir / "control_extraction_summary.tsv", sep="\t", index=False)
+
+    if any(row['status']!='ok' for row in extraction_rows):
+        raise SystemExit('Corrected marker extraction failed; inspect control_extraction_summary.tsv. No alignment launched.')
 
     for pair, sub in usable.groupby("pair"):
         pair_dir = outdir / pair

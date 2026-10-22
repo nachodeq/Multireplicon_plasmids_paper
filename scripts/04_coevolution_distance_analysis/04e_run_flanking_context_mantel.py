@@ -12,6 +12,7 @@ sequence itself, builds k-mer Jaccard distance matrices, and runs Mantel tests.
 from __future__ import annotations
 
 import argparse
+import sys
 import hashlib
 import math
 import random
@@ -21,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"shared"))
+from replicon_markers import annotation_overlap,context_caps,normalized_type
 
 
 DNA_COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
@@ -78,8 +81,8 @@ def read_fasta_one(path: Path) -> tuple[str, str]:
             if not line:
                 continue
             if line.startswith(">"):
-                if not header:
-                    header = line
+                if header:raise ValueError(f"Expected one FASTA record: {path}")
+                header = line
                 continue
             chunks.append(line.upper())
     return header, "".join(chunks)
@@ -130,7 +133,7 @@ def revcomp(seq: str) -> str:
     return seq.translate(DNA_COMP)[::-1].upper()
 
 
-def extract_context(seq: str, hit: RepHit, flank: int) -> tuple[str, str]:
+def extract_context(seq: str, hit: RepHit, flank: int, left_cap=None, right_cap=None) -> tuple[str, str]:
     """Return oriented context sequence and skip reason."""
     n = len(seq)
     if n == 0:
@@ -140,11 +143,13 @@ def extract_context(seq: str, hit: RepHit, flank: int) -> tuple[str, str]:
     rep_len = end - start + 1
     if start < 1 or end > n or rep_len <= 0:
         return "", "invalid_coordinates"
-    if n < rep_len + (2 * flank):
+    if left_cap is None and n < rep_len + (2 * flank):
         return "", "plasmid_too_short_for_nonoverlapping_context"
 
-    left = circular_slice(seq, (start - 1) - flank, flank)
-    right = circular_slice(seq, end, flank)
+    left_size=flank if left_cap is None else left_cap
+    right_size=flank if right_cap is None else right_cap
+    left = circular_slice(seq, (start - 1) - left_size, left_size)
+    right = circular_slice(seq, end, right_size)
     if hit.strand == "minus":
         return revcomp(right + left), ""
     return (left + right).upper(), ""
@@ -222,11 +227,15 @@ def pair_seed(global_seed: int, pair: str) -> int:
 
 def parse_pair_dir(pair_dir: Path) -> dict[tuple[str, str], RepHit]:
     hits = {}
-    for path in pair_dir.glob("*.fa"):
+    for path in sorted(pair_dir.glob("*.fa")):
+        if path.name.endswith("_all.fa"):continue
         hit = parse_rep_fasta(path)
         if hit is None:
             continue
-        hits[(hit.plasmid, hit.rep)] = hit
+        tag=normalized_type(hit.rep)
+        key=(hit.plasmid,tag)
+        if key in hits:raise ValueError(f"Ambiguous duplicate marker FASTAs for {key}; use a fresh corrected extraction")
+        hits[key] = hit
     return hits
 
 
@@ -292,6 +301,11 @@ def main() -> None:
             plasmids = sorted(rng_sample.sample(plasmids, args.max_n))
             was_subsampled = True
 
+        overlapping=[p for p in plasmids if annotation_overlap(hits[(p,rep_a)],hits[(p,rep_b)])>0]
+        if overlapping:
+            skip_rows.append(dict(pair=pair,reason='positive_annotation_overlap_in_frozen_sample',n_overlapping=len(overlapping),sampled_n=len(plasmids),plasmids=';'.join(overlapping)))
+            continue
+
         rep_a_seqs = []
         rep_b_seqs = []
         base_records = []
@@ -301,6 +315,10 @@ def main() -> None:
             seq = read_plasmid_seq(plasmid, fasta_dir, plasmid_cache)
             if not seq:
                 skip_rows.append({"pair": pair, "plasmid": plasmid, "reason": "missing_plasmid_fasta"})
+                continue
+            caps=context_caps(ha,hb,len(seq),min(flanks))
+            if caps[0]+caps[1]<args.kmer:
+                skip_rows.append(dict(pair=pair,plasmid=plasmid,reason='context_shorter_than_k_at_minimum_window'))
                 continue
             rep_a_seqs.append(ha.rep_seq)
             rep_b_seqs.append(hb.rep_seq)
@@ -323,8 +341,9 @@ def main() -> None:
             records = []
             skip_reason_counts: dict[str, int] = {}
             for r in base_records:
-                ca, reason_a = extract_context(r["plasmid_seq"], r["hitA"], flank)
-                cb, reason_b = extract_context(r["plasmid_seq"], r["hitB"], flank)
+                la,ra,lb,rb=context_caps(r["hitA"],r["hitB"],len(r["plasmid_seq"]),flank)
+                ca, reason_a = extract_context(r["plasmid_seq"], r["hitA"], flank,la,ra)
+                cb, reason_b = extract_context(r["plasmid_seq"], r["hitB"], flank,lb,rb)
                 reason = reason_a or reason_b
                 if reason:
                     skip_reason_counts[reason] = skip_reason_counts.get(reason, 0) + 1
@@ -343,6 +362,7 @@ def main() -> None:
                         "hitB_start": min(r["hitB"].sstart, r["hitB"].send),
                         "hitB_end": max(r["hitB"].sstart, r["hitB"].send),
                         "plasmid_length": len(r["plasmid_seq"]),
+                        "leftA":la,"rightA":ra,"leftB":lb,"rightB":rb,
                     }
                 )
 
@@ -431,7 +451,7 @@ def main() -> None:
     pd.DataFrame(per_plasmid_rows).to_csv(tables / "context_mantel_per_plasmid_records.tsv", sep="\t", index=False)
     pd.DataFrame(skip_rows).to_csv(tables / "context_mantel_skips.tsv", sep="\t", index=False)
 
-    ok = res[res["status"].eq("ok")].copy()
+    ok = res[res["status"].eq("ok")].copy() if not res.empty else res.copy()
     if not ok.empty:
         summary = (
             ok.groupby("flank_bp_each_side")

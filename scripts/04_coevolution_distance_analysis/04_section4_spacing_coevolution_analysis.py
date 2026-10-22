@@ -54,8 +54,9 @@ Required input for distance computation:
 - MOB-typer output directory containing:
     {plasmid_id}_analysis/replicon_blast_results.txt
     {plasmid_id}_summary.txt
-- plasmid_replicons.tsv with at least:
-    plasmid_id, size_bp
+- Nucleotide FASTA directory (--fasta-dir), one exact-accession record per plasmid.
+- MOB-suite 3.1.9 filtering source (installed or --mob-suite-utils).
+  The legacy --plasmid-replicons argument is accepted but its length column is not used.
 
 Required precomputed inputs:
 - cointegration table from Section 3, with:
@@ -75,6 +76,9 @@ Those are upstream analyses. This script only integrates their outputs.
 from __future__ import annotations
 
 import argparse
+import sys
+from itertools import combinations
+from Bio import SeqIO
 from collections import defaultdict
 from glob import glob
 from pathlib import Path
@@ -83,6 +87,8 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 from scipy.stats import ks_2samp, mannwhitneyu, spearmanr, wilcoxon
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"shared"))
+from replicon_markers import native_path,native_functions,final_markers,write_provenance,normalized_type
 
 
 # ============================================================
@@ -137,8 +143,8 @@ def parse_replicons(x: object) -> list[str]:
 
 
 def make_pair(a: object, b: object) -> str:
-    a = str(a).strip()
-    b = str(b).strip()
+    a = normalized_type(a)
+    b = normalized_type(b)
     a, b = sorted([a, b])
     return f"{a} | {b}"
 
@@ -170,160 +176,28 @@ def qcv(values: np.ndarray) -> float:
 # ============================================================
 
 def compute_replicon_distances_from_mobtyper(
-    mobtyper_dir: Path,
-    plasmid_replicons_path: Path | None,
-    min_dist_bp: int = 10,
-) -> pd.DataFrame:
-    id2size = {}
-
-    if plasmid_replicons_path is not None:
-        plasmid_replicons = read_table(plasmid_replicons_path)
-        id_col = first_existing(plasmid_replicons.columns, ["plasmid_id", "NUCCORE_ACC", "accession"])
-        size_col = first_existing(plasmid_replicons.columns, ["size_bp", "length_bp", "length"])
-        if id_col is not None and size_col is not None:
-            tmp = plasmid_replicons[[id_col, size_col]].copy()
-            tmp[id_col] = tmp[id_col].map(normalize_id)
-            tmp[size_col] = pd.to_numeric(tmp[size_col], errors="coerce")
-            id2size = dict(zip(tmp[id_col], tmp[size_col]))
-
-    blast_cols = [
-        "qseqid", "sseqid", "qlen", "slen", "qstart", "qend", "sstart", "send",
-        "length", "mismatch", "pident", "qcovhsp", "qcovs", "sstrand", "evalue", "bitscore",
-    ]
-
-    folders = glob(str(mobtyper_dir / "*_analysis"))
-    plasmid_ids = [Path(f).name.replace("_analysis", "") for f in folders]
-
-    all_rows = []
-
-    for plasmid_id in plasmid_ids:
-        analysis_folder = mobtyper_dir / f"{plasmid_id}_analysis"
-        blast_file = analysis_folder / "replicon_blast_results.txt"
-        summary_file = mobtyper_dir / f"{plasmid_id}_summary.txt"
-
-        if not blast_file.is_file() or not summary_file.is_file():
-            continue
-
-        try:
-            summary = pd.read_csv(summary_file, sep="\t")
-        except Exception:
-            continue
-
-        sample_col = first_existing(summary.columns, ["sample_id", "sample", "id"])
-        rep_col = first_existing(summary.columns, ["rep_type(s)", "replicon_types", "rep_types"])
-        acc_col = first_existing(summary.columns, ["rep_type_accession(s)", "rep_type_accessions", "rep_accession(s)"])
-
-        if sample_col is None or rep_col is None or acc_col is None:
-            continue
-
-        row = summary[summary[sample_col].astype(str).map(normalize_id) == normalize_id(plasmid_id)]
-        if row.empty:
-            row = summary.iloc[[0]]
-
-        rep_types = parse_replicons(row.iloc[0][rep_col])
-        rep_accessions = parse_replicons(row.iloc[0][acc_col])
-
-        if len(rep_types) < 2 or len(rep_accessions) < 2:
-            continue
-        if len(rep_types) != len(rep_accessions):
-            continue
-
-        try:
-            blast = pd.read_csv(blast_file, sep="\t")
-            if not {"qseqid", "sstart", "slen", "bitscore"}.issubset(blast.columns):
-                blast = pd.read_csv(blast_file, sep="\t", names=blast_cols, header=0)
-        except Exception:
-            try:
-                blast = pd.read_csv(blast_file, sep="\t", names=blast_cols, header=0)
-            except Exception:
-                continue
-
-        if blast.empty:
-            continue
-
-        replicon_positions = []
-        assigned_positions = []
-
-        for rep_type, rep_acc in zip(rep_types, rep_accessions):
-            hits = blast[blast["qseqid"].astype(str).str.contains(str(rep_acc), regex=False, na=False)].copy()
-            if hits.empty:
-                continue
-
-            hits["bitscore"] = pd.to_numeric(hits["bitscore"], errors="coerce")
-            hits = hits.sort_values("bitscore", ascending=False)
-
-            assigned = False
-
-            for hit in hits.itertuples(index=False):
-                pos = int(getattr(hit, "sstart"))
-                slen = int(getattr(hit, "slen"))
-
-                too_close = False
-                for prev in assigned_positions:
-                    diff = abs(pos - prev)
-                    dist = min(diff, slen - diff)
-                    if dist < min_dist_bp:
-                        too_close = True
-                        break
-
-                if not too_close:
-                    replicon_positions.append({
-                        "replicon": rep_type,
-                        "accession": rep_acc,
-                        "sstart": pos,
-                        "slen": slen,
-                    })
-                    assigned_positions.append(pos)
-                    assigned = True
-                    break
-
-            if not assigned and not hits.empty:
-                hit = hits.iloc[0]
-                pos = int(hit["sstart"])
-                slen = int(hit["slen"])
-                replicon_positions.append({
-                    "replicon": rep_type,
-                    "accession": rep_acc,
-                    "sstart": pos,
-                    "slen": slen,
-                })
-                assigned_positions.append(pos)
-
-        if len(replicon_positions) < 2:
-            continue
-
-        for i in range(len(replicon_positions)):
-            for j in range(i + 1, len(replicon_positions)):
-                r1 = replicon_positions[i]
-                r2 = replicon_positions[j]
-
-                pos1 = int(r1["sstart"])
-                pos2 = int(r2["sstart"])
-
-                plasmid_len = int(r1["slen"])
-                if not plasmid_len or plasmid_len <= 0:
-                    plasmid_len = int(id2size.get(normalize_id(plasmid_id), np.nan))
-
-                if not plasmid_len or not np.isfinite(plasmid_len) or plasmid_len <= 0:
-                    continue
-
-                diff = abs(pos2 - pos1)
-                dist_abs = min(diff, plasmid_len - diff)
-                dist_rel = dist_abs / plasmid_len
-
-                all_rows.append({
-                    "plasmid_id": normalize_id(plasmid_id),
-                    "replicon_1": r1["replicon"],
-                    "replicon_2": r2["replicon"],
-                    "pair": make_pair(r1["replicon"], r2["replicon"]),
-                    "pos_1": pos1,
-                    "pos_2": pos2,
-                    "plasmid_length": plasmid_len,
-                    "distance_absolute": dist_abs,
-                    "distance_relative": dist_rel,
-                })
-
-    return pd.DataFrame(all_rows)
+    mobtyper_dir:Path,plasmid_replicons_path:Path|None,min_dist_bp:int=10,
+    fasta_dir:Path|None=None,mob_suite_utils:Path|None=None,
+)->pd.DataFrame:
+    # min_dist_bp is retained as a deprecated CLI/API argument, not a locus filter.
+    if fasta_dir is None:raise ValueError('--fasta-dir is required for true nucleotide plasmid lengths')
+    native=native_functions(str(native_path(mob_suite_utils)));rows=[]
+    for summary in sorted(mobtyper_dir.glob('*_summary.txt')):
+        plasmid=summary.name[:-len('_summary.txt')]
+        row=pd.read_csv(summary,sep='\t',keep_default_na=False).iloc[0]
+        rep_col=first_existing(row.index,['rep_type(s)','replicon_types','rep_types'])
+        if rep_col is None or len(set(parse_replicons(row[rep_col])))<2:continue
+        assignments,chosen=final_markers(mobtyper_dir,plasmid,native)
+        paths=[fasta_dir/(plasmid+ext) for ext in ['.fasta','.fa','.fna']]
+        path=next((p for p in paths if p.is_file()),None)
+        if path is None:raise FileNotFoundError('Missing exact nucleotide FASTA '+plasmid)
+        genome=SeqIO.read(str(path),'fasta');length=len(genome.seq)
+        for typ,hit in chosen.items():
+            if not 1<=int(hit.sstart)<=int(hit.send)<=length:raise ValueError('Final HSP outside nucleotide sequence '+plasmid)
+        for a,b in combinations(sorted(assignments),2):
+            first,second=int(chosen[a].sstart),int(chosen[b].sstart);diff=abs(first-second);distance=min(diff,length-diff)
+            rows.append(dict(plasmid_id=plasmid,replicon_1=a,replicon_2=b,pair=make_pair(a,b),pos_1=first,pos_2=second,plasmid_length=length,distance_absolute=distance,distance_relative=distance/length))
+    return pd.DataFrame(rows)
 
 
 # ============================================================
@@ -717,6 +591,8 @@ def main() -> None:
 
     ap.add_argument("--distances", default=None, help="Existing replicon_distances.tsv.")
     ap.add_argument("--mobtyper-dir", default=None, help="MOB-typer output directory for distance computation.")
+    ap.add_argument("--fasta-dir", type=Path, help="Nucleotide FASTA directory; required with --mobtyper-dir.")
+    ap.add_argument("--mob-suite-utils", type=Path, help="Native MOB-suite 3.1.9 utils.py.")
     ap.add_argument("--plasmid-replicons", default=None, help="Optional plasmid_replicons.tsv for size fallback in distance computation.")
 
     ap.add_argument("--cointegration", default=None, help="Section 3 cointegration table.")
@@ -725,7 +601,7 @@ def main() -> None:
 
     ap.add_argument("--outdir", required=True, help="Output directory.")
     ap.add_argument("--min-pair-n", type=int, default=5, help="Minimum observations per replicon pair for QCV.")
-    ap.add_argument("--min-dist-bp", type=int, default=10, help="Minimum distance between assigned replicon hits when computing coordinates.")
+    ap.add_argument("--min-dist-bp", type=int, default=10, help="Deprecated compatibility argument; final native HSP coordinates are never shifted or filtered by distance.")
     ap.add_argument("--random-seed", type=int, default=123)
     ap.add_argument("--random-per-observed", type=int, default=1)
     ap.add_argument("--qcv-null-iterations", type=int, default=1000)
@@ -741,7 +617,9 @@ def main() -> None:
             mobtyper_dir=Path(args.mobtyper_dir),
             plasmid_replicons_path=Path(args.plasmid_replicons) if args.plasmid_replicons else None,
             min_dist_bp=args.min_dist_bp,
+            fasta_dir=args.fasta_dir,mob_suite_utils=args.mob_suite_utils,
         )
+        write_provenance(outdir,native_path(args.mob_suite_utils))
         if dist.empty:
             raise SystemExit("No distances were computed from MOB-typer outputs.")
     else:

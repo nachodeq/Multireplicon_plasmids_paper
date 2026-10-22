@@ -222,7 +222,7 @@ Compute spacing and its circular random null with:
 
 ```bash
 python3 scripts/04_coevolution_distance_analysis/04_section4_spacing_coevolution_analysis.py \
-  --mobtyper-dir data/mobtyper_outputs \
+  --mobtyper-dir data/mobtyper_outputs --fasta-dir data/plasmid_fastas \
   --plasmid-replicons data/plasmid_replicons.tsv \
   --cointegration results/03_cointegration/global_conditional_cointegration.tsv \
   --mantel results/04_mantel/multireplicon_pairwise_mantel_results.tsv \
@@ -259,7 +259,7 @@ Rscript scripts/04_coevolution_distance_analysis/04d_run_mantel_separate_plasmid
   --mantel-perm 9999 --mirror-perm 2000 --min-taxa 4 --seed 42
 ```
 
-The flanking-context analysis uses five symmetric window sizes:
+The flanking-context analysis uses five **nominal maximum** flank sizes per side:
 
 ```bash
 python3 scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel.py \
@@ -270,6 +270,74 @@ python3 scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel
   --flanks 500,1000,2000,4000,8000 \
   --kmer 15 --min-n 5 --max-n 100 \
   --permutations 99 --context-only-permutations --seed 20260702
+```
+
+Marker extraction and spacing replay the native **MOB-suite 3.1.9** filtering
+order, not a greedy replacement: `fixStart`, `remove_split_hits`, coordinate
+sorting, recursive overlap filtering (native threshold 5), then the final
+accession-key collapse used by `sort_biomarkers`. All three extraction/spacing
+commands accept `--mob-suite-utils /path/to/mob_suite/utils.py` when that package
+is not importable in the current Python environment. The configured source hash
+is written to `marker_filter_provenance.json`; no annotation or database download
+is performed. Cached native replicon BLAST reports must already carry the
+identity/coverage filtering from their original MOB run.
+
+Each assigned **distinct exact type** uses its first paired summary reference
+and one highest-bit-score **final retained** HSP for the full exact
+`accession|type` query; ties use genomic/query coordinates and strand. Pair filenames and join keys use the original corrected identifier sanitizer
+(non-alphanumeric characters become underscores); raw type strings remain in
+headers and exact query matching. This prevents punctuation aliases from losing
+spacing/Mantel/control joins. There are
+no substring matches, raw-hit fallbacks, circular fragment assembly, or forced
+coordinate separation. Extraction failures are explicit and stop before alignment.
+Nucleotide FASTAs must contain one record with an exact accession filename;
+protein-length metadata are not used as plasmid lengths. Legacy versionless
+control metadata resolve only to a unique cached accession. Repeated assignments
+of the same type do not generate self-pairs. Separate-plasmid controls retain
+the existing cell assignments; they do not require both source plasmids to have
+only one replicon type.
+
+Use **new or empty output directories** for 04a/04b. This is operational stale-file
+protection, not a scientific selection criterion: old raw-marker FASTAs or
+alignments must not be silently reused after correcting the extraction. The spacing command preserves its existing cohort contract: it scans all cached
+MOB summaries in the supplied directory. Supply a directory containing the
+intended representative cohort; `--plasmid-replicons` is not an ID selection
+filter. The
+spacing `--min-dist-bp` argument remains accepted for compatibility but no longer
+shifts or rejects final native marker coordinates.
+
+04e freezes the sorted common plasmids and the deterministic max-100 subsample
+**before** checking overlap. If any selected marker annotations overlap by even
+one bp in this frozen sample, the **whole type-pair** is excluded and listed in
+`tables/context_mantel_skips.tsv`. This is stricter than native MOB filtering,
+which can retain small residual overlaps. Otherwise, each side is capped at half
+the inter-marker circular gap (floor), so neither context includes either marker
+or overlaps the other context. Actual left/right and total lengths are exported
+per plasmid; `context_total_bp` is only the nominal upper limit. At the smallest
+requested flank, contexts shorter than k are explicitly skipped once; the same
+remaining plasmids are used for all five sizes. A minus-strand marker retains
+the original reverse-complement concatenation convention. The original
+noncanonical 15-mer Jaccard calculation, 99 permutations and seed 20260702 are
+unchanged. Concatenated `_all.fa` files are never mistaken for individual loci.
+
+04c/04d retain NJ(dist.ml) → pml → optim.pml(GTR), the original default one rate
+category (`optGamma=TRUE` is ignored at k=1), 100 bootstrap replicates per tree,
+Pearson Mantel with 9,999 permutations and 2,000 mirror permutations. The default
+bootstrap can be configured with `--bootstrap-reps`; bootstrap errors are caught
+and logged in per-pair `*_bootstrap_warnings.txt`, **not** used to reject a valid
+ML/Mantel result. No successful-bootstrap acceptance gate is imposed. The original
+Mantel/mirror seeds remain 42; bootstrap initialization was not explicitly seeded.
+
+The corrected local analysis was exercised with MOB-suite 3.1.9, MUSCLE 5.3,
+R 4.6.1, ape 5.8.1, phangorn 2.12.1 and vegan 2.7.5; these are observed versions,
+not a claim that every environment version was independently tested. Large
+alignments and tree/bootstrap calculations can take hours. A lightweight native
+filter/CLI regression can be run without repeating those phylogenies:
+
+```bash
+MOB_SUITE_UTILS=/path/to/mob_suite/utils.py python3 -m unittest discover -s tests -v
+python3 -m compileall -q scripts
+Rscript tests/test_mantel_bootstrap.R
 ```
 
 Alignment, tree reconstruction and permutation tests are resource-intensive.

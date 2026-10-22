@@ -20,7 +20,8 @@ parse_args <- function(default_context) {
     min_taxa = 4,
     seed = 42,
     write_trees = TRUE,
-    write_patristic = TRUE
+    write_patristic = TRUE,
+    bootstrap_reps = 100
   )
 
   i <- 1
@@ -31,6 +32,7 @@ parse_args <- function(default_context) {
     if (key == "--input-dir") { cfg$input_dir <- val; i <- i + 2; next }
     if (key == "--out-file") { cfg$out_file <- val; i <- i + 2; next }
     if (key == "--context") { cfg$context <- val; i <- i + 2; next }
+    if (key == "--bootstrap-reps") { cfg$bootstrap_reps <- as.integer(val); i <- i + 2; next }
     if (key == "--model") { cfg$model <- val; i <- i + 2; next }
     if (key == "--opt-gamma") { cfg$opt_gamma <- as.logical(val); i <- i + 2; next }
     if (key == "--opt-inv") { cfg$opt_inv <- as.logical(val); i <- i + 2; next }
@@ -98,7 +100,7 @@ fit_ml_tree <- function(aln, cfg) {
     optInv = cfg$opt_inv,
     control = pml.control(trace = 0)
   )
-  return(fit$tree)
+  return(fit)
 }
 
 process_pair <- function(pair_dir, cfg) {
@@ -138,8 +140,10 @@ process_pair <- function(pair_dir, cfg) {
     stop("too_few_sequences_before_tree")
   }
 
-  tree1 <- fit_ml_tree(aln1, cfg)
-  tree2 <- fit_ml_tree(aln2, cfg)
+  fit1 <- fit_ml_tree(aln1, cfg)
+  fit2 <- fit_ml_tree(aln2, cfg)
+  tree1 <- fit1$tree
+  tree2 <- fit2$tree
 
   out_prefix <- file.path(pair_dir, pair_label)
 
@@ -147,6 +151,30 @@ process_pair <- function(pair_dir, cfg) {
     write.tree(tree1, file = paste0(out_prefix, "_", repA, "_ML.tree"))
     write.tree(tree2, file = paste0(out_prefix, "_", repB, "_ML.tree"))
   }
+
+  # Original bootstrap failures are diagnostic only: continue with the ML trees.
+  bootstrap_warnings <- character()
+  if (cfg$bootstrap_reps > 0) {
+    for (j in seq_len(2)) {
+      fit <- if (j == 1) fit1 else fit2
+      tree <- if (j == 1) tree1 else tree2
+      rep <- if (j == 1) repA else repB
+      bs <- tryCatch(
+        bootstrap.pml(fit, bs = cfg$bootstrap_reps, optNni = TRUE, control = pml.control(trace = 0)),
+        error = function(e) {
+          message <- paste("bootstrap failed for", rep, ":", conditionMessage(e))
+          cat(message, "\n")
+          bootstrap_warnings <<- c(bootstrap_warnings, message)
+          NULL
+        }
+      )
+      if (!is.null(bs) && cfg$write_trees) {
+        supported <- plotBS(tree, bs, type = "none")
+        write.tree(supported, file = paste0(out_prefix, "_", rep, "_ML_bootstrapped.tree"))
+      }
+    }
+  }
+  writeLines(bootstrap_warnings, paste0(out_prefix, "_bootstrap_warnings.txt"))
 
   D1 <- as.matrix(cophenetic.phylo(tree1)); diag(D1) <- 0
   D2 <- as.matrix(cophenetic.phylo(tree2)); diag(D2) <- 0

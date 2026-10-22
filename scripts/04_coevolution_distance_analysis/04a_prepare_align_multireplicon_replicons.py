@@ -34,6 +34,7 @@ Expected derep representatives table:
 from __future__ import annotations
 
 import argparse
+import sys
 import glob
 import os
 import re
@@ -47,13 +48,16 @@ from typing import Iterable
 import pandas as pd
 from Bio import SeqIO
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'shared'))
+from replicon_markers import assigned_references,final_markers,native_path,native_functions,extract_sequence,write_provenance,resolve_cached_id,find_nucleotide_fasta
+
 
 # ============================================================
 # Helpers
 # ============================================================
 
 def clean_tag(s: object) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(s).strip())
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(s).strip())
 
 
 def basename_noext(x: object) -> str:
@@ -98,12 +102,8 @@ def index_fastas(fasta_dir: Path) -> dict[str, Path]:
     return idx
 
 
-def find_fasta(plasmid_id: str, fasta_index: dict[str, Path], fasta_dir: Path) -> Path | None:
-    b = basename_noext(plasmid_id)
-    if b in fasta_index:
-        return fasta_index[b]
-    matches = list(fasta_dir.glob(f"*{b}*"))
-    return matches[0] if matches else None
+def find_fasta(plasmid_id,fasta_index,fasta_dir):
+    return find_nucleotide_fasta(plasmid_id,fasta_dir)
 
 
 def read_single_sequence(fasta_path: Path):
@@ -111,7 +111,7 @@ def read_single_sequence(fasta_path: Path):
     if not seqs:
         raise ValueError(f"No sequences found in FASTA: {fasta_path}")
     if len(seqs) > 1:
-        print(f"[warn] {fasta_path} has {len(seqs)} records; using first record.")
+        raise ValueError(f"Expected one nucleotide FASTA record: {fasta_path}")
     return seqs[0]
 
 
@@ -120,53 +120,15 @@ def map_type_to_accession(plasmid_reps: dict, plasmid_rep_accs: dict, plasmid_id
     accs = plasmid_rep_accs.get(plasmid_id, [])
 
     for i, t in enumerate(types):
-        if rep_type == t or rep_type in t or t in rep_type:
+        if rep_type == t:
             if i < len(accs):
                 return accs[i]
     return None
 
 
-def find_best_hit(blast_df: pd.DataFrame, rep_accession: str) -> pd.Series | None:
-    if "qseqid" not in blast_df.columns:
-        raise ValueError("replicon_blast_results.txt lacks qseqid column")
-
-    matches = blast_df[blast_df["qseqid"].astype(str).str.contains(rep_accession, na=False, regex=False)].copy()
-
-    if matches.empty and "sseqid" in blast_df.columns:
-        matches = blast_df[blast_df["sseqid"].astype(str).str.contains(rep_accession, na=False, regex=False)].copy()
-
-    if matches.empty:
-        return None
-
-    if "bitscore" in matches.columns:
-        matches["bitscore"] = pd.to_numeric(matches["bitscore"], errors="coerce")
-        if matches["bitscore"].notna().any():
-            return matches.loc[matches["bitscore"].idxmax()]
-
-    return matches.iloc[0]
-
-
-def extract_hit_sequence(seq_record, hit: pd.Series):
-    for col in ["sstart", "send"]:
-        if col not in hit.index:
-            raise ValueError(f"BLAST hit lacks {col}")
-
-    sstart = int(hit["sstart"])
-    send = int(hit["send"])
-    sstrand = str(hit.get("sstrand", "plus"))
-    seq_len = len(seq_record.seq)
-
-    if sstart < 1 or send < 1 or sstart > seq_len or send > seq_len:
-        raise ValueError(f"Coordinates out of range: {sstart}-{send}; plasmid length={seq_len}")
-
-    a = min(sstart, send) - 1
-    b = max(sstart, send)
-    subseq = seq_record.seq[a:b]
-
-    if sstrand.lower() == "minus":
-        subseq = subseq.reverse_complement()
-
-    return subseq, sstart, send, sstrand
+def extract_hit_sequence(seq_record,hit):
+    sequence=extract_sequence(seq_record.seq,hit)
+    return sequence,int(hit.sstart),int(hit.send),str(hit.sstrand)
 
 
 def run_alignment(input_fasta: Path, output_fasta: Path, threads: int = 8, aligner: str = "auto") -> str:
@@ -219,6 +181,7 @@ def concatenate_fastas(fastas: list[Path], out_fasta: Path) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Prepare and align multireplicon replicon pairs for Mantel analysis.")
     ap.add_argument("--mobtyper-dir", required=True)
+    ap.add_argument("--mob-suite-utils", type=Path, help="Native MOB-suite 3.1.9 utils.py; otherwise use installed mob_suite.")
     ap.add_argument("--fasta-dir", required=True)
     ap.add_argument("--derep-representatives", required=True, help="TSV with column 'representative'.")
     ap.add_argument("--outdir", required=True)
@@ -227,17 +190,32 @@ def main() -> None:
     ap.add_argument("--aligner", choices=["auto", "muscle", "mafft"], default="auto")
     ap.add_argument("--skip-align", action="store_true", help="Extract and concatenate only; do not run aligner.")
     args = ap.parse_args()
+    utils_path=native_path(args.mob_suite_utils)
+    native=native_functions(str(utils_path))
+    marker_cache={}
 
     mobtyper_dir = Path(args.mobtyper_dir)
     fasta_dir = Path(args.fasta_dir)
     outdir = Path(args.outdir)
+    if outdir.exists() and any(outdir.iterdir()):
+        raise SystemExit("Use a new or empty output directory; do not mix corrected markers with previous extraction outputs.")
     outdir.mkdir(parents=True, exist_ok=True)
+    write_provenance(outdir,utils_path)
 
     derep = pd.read_csv(args.derep_representatives, sep="\t", dtype=str)
     if "representative" not in derep.columns:
         raise SystemExit("Derep representatives table must contain column: representative")
 
-    derep_ids = set(derep["representative"].dropna().astype(str).map(basename_noext))
+    def representative_accession(value):
+        name=Path(str(value).strip()).name
+        for suffix in ['.fasta','.fna','.fa']:
+            if name.endswith(suffix):return name[:-len(suffix)]
+        return name
+    derep_ids=set(derep['representative'].dropna().map(representative_accession))
+    available=[p.name[:-len('_summary.txt')] for p in mobtyper_dir.glob('*_summary.txt')]
+    for identifier in list(derep_ids):
+        if identifier not in available and not ('.' in identifier and identifier.rsplit('.',1)[1].isdigit()):
+            derep_ids.remove(identifier);derep_ids.add(resolve_cached_id(identifier,mobtyper_dir))
     print(f"[info] dereplicated representatives: {len(derep_ids)}")
 
     fasta_index = index_fastas(fasta_dir)
@@ -248,7 +226,7 @@ def main() -> None:
 
     for summary_file in sorted(mobtyper_dir.glob("*_summary.txt")):
         plasmid_id = summary_file.name.replace("_summary.txt", "")
-        if basename_noext(plasmid_id) not in derep_ids:
+        if plasmid_id not in derep_ids:
             continue
 
         df = pd.read_csv(summary_file, sep="\t", dtype=str, keep_default_na=False)
@@ -278,6 +256,10 @@ def main() -> None:
     selected = {k: v for k, v in pair_to_plasmids.items() if len(v) >= args.min_count}
     print(f"[info] pairs with count >= {args.min_count}: {len(selected)}")
 
+    if not selected:
+        pd.DataFrame(columns=["repA","repB","pair","n_plasmids"]).to_csv(outdir/"multireplicon_pair_counts.tsv",sep="\t",index=False)
+        print("[done] No eligible distinct-type pairs.");return
+
     pair_summary = pd.DataFrame([
         {"repA": a, "repB": b, "pair": f"{clean_tag(a)}__{clean_tag(b)}", "n_plasmids": len(v)}
         for (a, b), v in selected.items()
@@ -306,10 +288,9 @@ def main() -> None:
 
             try:
                 seq_record = read_single_sequence(fasta_path)
-                blast_df = pd.read_csv(blast_file, sep="\t", dtype=str, keep_default_na=False)
-                for c in ["sstart", "send", "bitscore"]:
-                    if c in blast_df.columns:
-                        blast_df[c] = pd.to_numeric(blast_df[c], errors="coerce")
+                if plasmid_id not in marker_cache:
+                    marker_cache[plasmid_id]=final_markers(mobtyper_dir,plasmid_id,native)
+                assignments,chosen=marker_cache[plasmid_id]
 
                 for rep_type in [repA, repB]:
                     rep_acc = map_type_to_accession(plasmid_reps, plasmid_rep_accs, plasmid_id, rep_type)
@@ -317,7 +298,8 @@ def main() -> None:
                         extraction_rows.append({"pair": pair_name, "plasmid_id": plasmid_id, "replicon": rep_type, "status": "missing_rep_accession"})
                         continue
 
-                    hit = find_best_hit(blast_df, rep_acc)
+                    hit = chosen.get(rep_type)
+                    if assignments.get(rep_type)!=rep_acc:raise ValueError("Assigned summary reference changed during extraction")
                     if hit is None:
                         extraction_rows.append({"pair": pair_name, "plasmid_id": plasmid_id, "replicon": rep_type, "rep_accession": rep_acc, "status": "missing_blast_hit"})
                         continue
@@ -329,7 +311,7 @@ def main() -> None:
                     with open(out_fa, "w") as oh:
                         oh.write(
                             f">{plasmid_id}|{rep_type}|qseqid:{hit.get('qseqid','')}|"
-                            f"sstart:{sstart}|send:{send}|sstrand:{sstrand}\n"
+                            f"sstart:{sstart}|send:{send}|sstrand:{sstrand}|plasmid_length:{len(seq_record.seq)}|marker_selection:final_MOB_HSP\n"
                         )
                         oh.write(str(subseq) + "\n")
 
@@ -340,6 +322,9 @@ def main() -> None:
                         "rep_accession": rep_acc,
                         "source_fasta": str(fasta_path),
                         "blast_file": str(blast_file),
+                        "qseqid": str(hit.qseqid),
+                        "bitscore": float(hit.bitscore),
+                        "plasmid_length": len(seq_record.seq),
                         "sstart": sstart,
                         "send": send,
                         "sstrand": sstrand,
@@ -350,6 +335,12 @@ def main() -> None:
             except Exception as e:
                 extraction_rows.append({"pair": pair_name, "plasmid_id": plasmid_id, "status": "failed", "error": str(e)})
 
+    pd.DataFrame(extraction_rows).to_csv(outdir / "multireplicon_extraction_summary.tsv", sep="\t", index=False)
+    if any(row['status']!='ok' for row in extraction_rows):
+        raise SystemExit('Corrected marker extraction failed; inspect multireplicon_extraction_summary.tsv. No alignment launched.')
+    for (repA,repB),plasmids in selected.items():
+        pair_name=f'{clean_tag(repA)}__{clean_tag(repB)}'
+        pair_dir=outdir/pair_name
         for rep_type in [repA, repB]:
             tag = clean_tag(rep_type)
             files = list(pair_dir.glob(f"*__{tag}.fa"))
@@ -379,7 +370,6 @@ def main() -> None:
                 "aligner": used_aligner,
             })
 
-    pd.DataFrame(extraction_rows).to_csv(outdir / "multireplicon_extraction_summary.tsv", sep="\t", index=False)
     pd.DataFrame(alignment_rows).to_csv(outdir / "multireplicon_alignment_summary.tsv", sep="\t", index=False)
     print("[done] Multireplicon FASTA extraction and alignment complete.")
 
