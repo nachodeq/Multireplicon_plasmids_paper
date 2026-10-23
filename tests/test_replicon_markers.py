@@ -66,6 +66,13 @@ class NativeMarkerTests(unittest.TestCase):
    df=pd.read_csv(root/'out/control_extraction_summary.tsv',sep='\t');self.assertEqual(set(df.source_plasmid),{'C1.1','C2.1'});self.assertEqual(set(df.qseqid),{'R1|A','R2|B'});self.assertTrue(df.status.eq('ok').all())
 
 class FlankMarkerTests(unittest.TestCase):
+ def test_default_is_only_one_kb_with_explicit_legacy_override(self):
+  from unittest.mock import patch
+  spec=importlib.util.spec_from_file_location('flanks_primary_default',ROOT/'scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel.py');m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
+  argv=['flanks','--mantel-results','m.tsv','--trees-dir','trees','--fasta-dir','fasta']
+  with patch.object(sys,'argv',argv):self.assertEqual(m.parse_args().flanks,'1000')
+  with patch.object(sys,'argv',argv+['--flanks','500,1000,2000,4000,8000']):self.assertEqual(m.parse_args().flanks,'500,1000,2000,4000,8000')
+
  def test_parser_ignores_concatenates_and_geometry_is_disjoint(self):
   spec=importlib.util.spec_from_file_location('flanks_markers',ROOT/'scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel.py');m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
   with tempfile.TemporaryDirectory() as d:

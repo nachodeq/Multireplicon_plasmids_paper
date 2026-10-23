@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
     )
     p.add_argument("--outdir", default="mantel_surrounding_replicons")
-    p.add_argument("--flanks", default="500,1000,2000,4000,8000")
+    p.add_argument("--flanks", default="1000", help="Nominal maximum bp per side; default only 1 kb. Explicit overrides reproduce historical sensitivity windows.")
     p.add_argument("--kmer", type=int, default=15)
     p.add_argument("--min-n", type=int, default=5)
     p.add_argument("--max-n", type=int, default=100)

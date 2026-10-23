@@ -26,8 +26,12 @@ is changed by this revision.
 - Flanks: freeze the common sorted cohort, apply the existing deterministic
   max-100 sampling, exclude the entire pair for any positive sampled annotation
   overlap, otherwise split each circular inter-marker gap at its floor midpoint.
-  The five windows are nominal maxima, and identical valid plasmids are used at
-  every window. Actual lengths and explicit exclusions are exported.
+  The current default is only 1 kb per side (nominal maximum after clipping).
+  Explicit historical sensitivity-window overrides retain identical valid
+  plasmids at requested windows. Actual lengths and exclusions are exported.
+  The 1-kb focus was chosen after examining five windows, not prespecified anew;
+  unchanged raw P values are reported for this selected view, while historical
+  five-window BH results remain archived.
 - Inference: original k=15 Jaccard, 99 context permutations, seed20260702; original
   NJ/pml/optim.pml GTR one-category tree fits, 100 bootstraps, 9,999 Pearson Mantel
   permutations and 2,000 mirror permutations. Bootstrap errors are diagnostics,

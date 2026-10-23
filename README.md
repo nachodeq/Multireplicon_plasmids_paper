@@ -267,7 +267,8 @@ Rscript scripts/04_coevolution_distance_analysis/04d_run_mantel_separate_plasmid
   --mantel-perm 9999 --mirror-perm 2000 --min-taxa 4 --seed 42
 ```
 
-The flanking-context analysis uses five **nominal maximum** flank sizes per side:
+The current flanking-context analysis uses **only 1 kb per side**, a nominal maximum
+after the unchanged midpoint clipping:
 
 ```bash
 python3 scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel.py \
@@ -275,7 +276,7 @@ python3 scripts/04_coevolution_distance_analysis/04e_run_flanking_context_mantel
   --trees-dir results/04_multireplicon_alignments \
   --fasta-dir data/plasmid_fastas \
   --outdir results/04_flanking_context \
-  --flanks 500,1000,2000,4000,8000 \
+  --flanks 1000 \
   --kmer 15 --min-n 5 --max-n 100 \
   --permutations 99 --context-only-permutations --seed 20260702
 ```
@@ -323,10 +324,15 @@ the inter-marker circular gap (floor), so neither context includes either marker
 or overlaps the other context. Actual left/right and total lengths are exported
 per plasmid; `context_total_bp` is only the nominal upper limit. At the smallest
 requested flank, contexts shorter than k are explicitly skipped once; the same
-remaining plasmids are used for all five sizes. A minus-strand marker retains
+remaining plasmids are used for the requested flank size(s). A minus-strand marker retains
 the original reverse-complement concatenation convention. The original
 noncanonical 15-mer Jaccard calculation, 99 permutations and seed 20260702 are
 unchanged. Concatenated `_all.fa` files are never mistaken for individual loci.
+The default `--flanks 1000` does not change the stored 1-kb Mantel results.
+Explicit multi-window overrides remain available only to reproduce historical
+sensitivity analyses. The 1-kb focus was selected after examining five windows;
+it is not a new prespecified independent test. Active one-window summaries use
+unchanged raw P values; the earlier five-window BH correction remains historical.
 
 04c/04d retain NJ(dist.ml) → pml → optim.pml(GTR), the original default one rate
 category (`optGamma=TRUE` is ignored at k=1), 100 bootstrap replicates per tree,
